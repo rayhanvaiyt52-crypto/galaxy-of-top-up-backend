@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#090d16"><link rel="manifest" href="/admin-manifest.webmanifest"><link rel="icon" href="/icon.svg">
+<title>Galaxy Admin</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#090d16;color:#f1f5f9;font:15px system-ui,Arial}header{padding:18px;background:#111a2d;border-bottom:1px solid #334155;position:sticky;top:0}main{max-width:1000px;margin:auto;padding:18px}.brand{font-weight:900;letter-spacing:1px}.brand span{color:#c084fc}.muted{color:#94a3b8;font-size:13px}.card{background:#131b2e;border:1px solid #334155;border-radius:16px;padding:18px;margin:16px 0}.field{width:100%;padding:12px;border-radius:10px;border:1px solid #475569;background:#080e1b;color:white;margin:7px 0 14px}.btn{padding:11px 15px;border-radius:10px;border:0;background:linear-gradient(100deg,#9333ea,#4f46e5);color:white;font-weight:800}.btn.alt{background:#263449}.btn:disabled{opacity:.5}.row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.stat{background:#0a1221;border:1px solid #334155;padding:14px;border-radius:12px}.stat b{display:block;font-size:24px;color:#c4b5fd}.orders{display:grid;gap:12px}.order{background:#0b1220;border:1px solid #334155;padding:14px;border-radius:12px}.order p{margin:6px 0;font-size:13px;color:#cbd5e1}.order strong{color:white}.order select{padding:9px;background:#172238;color:white;border:1px solid #475569;border-radius:9px}.error{color:#fda4af}.ok{color:#86efac}.hidden{display:none!important}@media(max-width:560px){.stats{grid-template-columns:1fr 1fr}.order .row{align-items:flex-start}}
+</style>
+</head>
+<body>
+<header><div class="row"><div><div class="brand">⚡ GALAXY <span>ADMIN</span></div><div class="muted">Store management dashboard</div></div><button class="btn alt hidden" id="logout">Logout</button></div></header>
+<main>
+<section class="card" id="loginCard"><h2>Admin Login</h2><p class="muted">Sign in using the administrator account configured on your server.</p><label class="muted">Email</label><input class="field" id="email" type="email" autocomplete="username" placeholder="admin@example.com"><label class="muted">Password</label><input class="field" id="password" type="password" autocomplete="current-password" placeholder="Password"><button class="btn" id="login" style="width:100%">Sign in</button><p id="loginMsg" class="muted"></p></section>
+<section id="dashboard" class="hidden">
+<div class="row"><div><h2 style="margin-bottom:4px">Dashboard</h2><div class="muted">Manage customer orders and delivery status</div></div><button class="btn" id="refresh">↻ Refresh</button></div>
+<div class="stats"><div class="stat"><span class="muted">Total orders</span><b id="total">0</b></div><div class="stat"><span class="muted">Pending payment</span><b id="pending">0</b></div><div class="stat"><span class="muted">Delivered</span><b id="delivered">0</b></div></div>
+<div class="card"><div class="row"><h3>Orders</h3><span class="muted" id="updated"></span></div><div id="orders" class="orders"><p class="muted">Loading orders…</p></div></div>
+</section>
+<p class="muted">Security: keep your admin password private. Only use HTTPS in production.</p>
+</main>
+<script>
+let token=localStorage.getItem('galaxyAdminToken')||'';
+const $=id=>document.getElementById(id);
+function showDashboard(){ $('loginCard').classList.add('hidden');$('dashboard').classList.remove('hidden');$('logout').classList.remove('hidden');loadOrders() }
+async function login(){ $('loginMsg').textContent='Signing in…';try{const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$('email').value,password:$('password').value})});const d=await r.json();if(!r.ok)throw Error(d.error||'Login failed');if(d.role!=='admin')throw Error('This account is not an administrator.');token=d.token;localStorage.setItem('galaxyAdminToken',token);$('loginMsg').textContent='Login successful.';showDashboard()}catch(e){$('loginMsg').textContent=e.message;$('loginMsg').className='error'}}
+async function loadOrders(){ $('orders').innerHTML='<p class="muted">Loading…</p>';try{const r=await fetch('/api/admin/orders',{headers:{Authorization:'Bearer '+token}});const d=await r.json();if(!r.ok)throw Error(d.error||'Could not load orders');const a=d.orders||[];$('total').textContent=a.length;$('pending').textContent=a.filter(x=>x.status==='PENDING_PAYMENT').length;$('delivered').textContent=a.filter(x=>x.status==='DELIVERED').length;$('updated').textContent='Updated '+new Date().toLocaleTimeString();$('orders').innerHTML=a.length?a.map(o=>`<article class="order"><div class="row"><strong>${esc(o.orderId)}</strong><span class="muted">${new Date(o.createdAt).toLocaleString()}</span></div><p><strong>${esc(o.gameName)}</strong> · ${esc(o.packageName)}</p><p>Player ID: ${esc(o.playerId)} · ৳ ${Number(o.amount).toFixed(2)}</p><p>Payment: ${esc(o.paymentMethod)} · <strong>${esc(o.status)}</strong></p><div class="row"><select data-status="${esc(o.orderId)}"><option ${o.status==='PENDING_PAYMENT'?'selected':''}>PENDING_PAYMENT</option><option ${o.status==='PAID'?'selected':''}>PAID</option><option ${o.status==='PROCESSING'?'selected':''}>PROCESSING</option><option ${o.status==='DELIVERED'?'selected':''}>DELIVERED</option><option ${o.status==='CANCELLED'?'selected':''}>CANCELLED</option><option ${o.status==='REFUNDED'?'selected':''}>REFUNDED</option></select><button class="btn" data-save="${esc(o.orderId)}">Update status</button></div></article>`).join(''):'<p class="muted">No orders yet.</p>';document.querySelectorAll('[data-save]').forEach(b=>b.onclick=()=>updateStatus(b.dataset.save))}catch(e){$('orders').innerHTML='<p class="error">'+esc(e.message)+'</p>';if(e.message.includes('Authentication'))logout()}}
+async function updateStatus(id){const s=document.querySelector(`[data-status="${CSS.escape(id)}"]`).value;if(s==='DELIVERED'&&!confirm('Confirm only if the game item has actually been delivered. Continue?'))return;try{const r=await fetch('/api/admin/orders/'+encodeURIComponent(id)+'/status',{method:'PATCH',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({status:s})});const d=await r.json();if(!r.ok)throw Error(d.error||'Update failed');loadOrders()}catch(e){alert(e.message)}}
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function logout(){token='';localStorage.removeItem('galaxyAdminToken');$('dashboard').classList.add('hidden');$('loginCard').classList.remove('hidden');$('logout').classList.add('hidden')}
+$('login').onclick=login;$('password').addEventListener('keydown',e=>{if(e.key==='Enter')login()});$('refresh').onclick=loadOrders;$('logout').onclick=logout;
+if(token)showDashboard();
+if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
+</script>
+</body></html>
